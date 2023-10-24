@@ -27,31 +27,11 @@ class MultiTaskEmotionModel(torch.nn.Module):
         pooled_output = outputs.hidden_states[-1][:, 0, :]
 
         # For classification task
-        # classification_logits = self.classification_head(outputs.last_hidden_state[:, 0, :])
-        # classification_logits = outputs.logits
         classification_logits = self.classification_head(pooled_output)
-
-        # print(f"classification_logits: {classification_logits}")
-        # print(f"outputs: {outputs}")
-        # classification_logits = self.classification_head(outputs.logits)
 
 
         # For regression task
-        # regression_output = self.regression_head(outputs.last_hidden_state[:, 0, :])
-        # regression_output = self.regression_head(outputs.pooler_output)
-        # regression_output = self.regression_head(outputs.hidden_states[:, 0, :])
-         # Forward pass for emotion intensity regression
-        # sequence_output = outputs.hidden_states[-1]  # Use the last hidden state as input for regression
-        # mean_hidden_state = torch.mean(sequence_output, dim=1)  # Calculate mean hidden state
-        # regression_output = torch.squeeze(mean_hidden_state)  # Remove extra dimension
-        # regression_output = outputs.hidden_states[-1][:, 0, :]
         regression_output = self.regression_head(pooled_output)
-
-
-        # regression_output = outputs.pooler_output
-        # pooled_output = outputs.hidden_states[:, 0]  # Use the [CLS] token's hidden state
-        # regression_output = self.regression_head(pooled_output)
-
 
 
 
@@ -64,13 +44,6 @@ def load_data(file_path, tokenizer):
     labels_regression = []
 
     with open(file_path, encoding='utf-8') as f:
-        # next(f)  # Skip the header line
-        # for line in f:
-        #     parts = line.strip().split("\t")
-        #     text, emotion, intensity = parts[1], parts[2], float(parts[3])
-        #     texts.append(text)
-        #     labels_classification.append(emotion)
-        #     labels_regression.append(intensity)
         next(f)  # Skip the header line
         for line in f:
             # print(f"Line contents: {line}")  # Add this line to print the contents of each line
@@ -78,12 +51,9 @@ def load_data(file_path, tokenizer):
             # print(f"parts[1]: {parts[1]}")
             if len(parts) >= 4:
               text, emotion, intensity =  parts[1], parts[2], round(float((parts[3])),1)
-              # print(f"text: {text}")
               texts.append(text)
               labels_classification.append(emotion)
               labels_regression.append(intensity)
-            # else:
-              # print(f"Skipped line: {line}")  # Print if line is skipped due to missing elements
 
 
     inputs = tokenizer(texts, padding=True, truncation=True, return_tensors='pt')
@@ -93,17 +63,15 @@ def load_data(file_path, tokenizer):
     labels_classification_encoded = emotion_label_encoder.fit_transform(labels_classification)
 
     labels_classification = torch.tensor(labels_classification_encoded)
-    # labels_regression = torch.tensor(labels_regression)
-    # print(f"lables_regression:{labels_regression}")
     labels_regression = torch.tensor(labels_regression,dtype=torch.float)
 
 
     return TensorDataset(inputs.input_ids, inputs.attention_mask, labels_classification, labels_regression)
 
 # # Load the data
-train_dataset = load_data('train.txt', tokenizer)
-valid_dataset = load_data('dev.txt', tokenizer)
-test_dataset = load_data('test.txt', tokenizer)
+train_dataset = load_data('/home/train.txt', tokenizer)
+valid_dataset = load_data('/home/dev.txt', tokenizer)
+test_dataset = load_data('/home/test.txt', tokenizer)
 
 # Create DataLoader objects
 BATCH_SIZE = 32
@@ -131,7 +99,7 @@ classification_criterion = torch.nn.CrossEntropyLoss()
 regression_criterion = torch.nn.MSELoss()
 
 # Train the multi-task model
-NUM_EPOCHS = 1
+NUM_EPOCHS = 6
 # Early stopping parameters
 early_stopping_patience = 20  # Number of epochs to wait for improvement
 best_combined_loss = float('inf')  # Initialize the best validation loss
@@ -157,7 +125,11 @@ for epoch in range(NUM_EPOCHS):
         # Compute losses for classification and regression tasks
         classification_loss = classification_criterion(classification_logits, batch_labels_classification)
         # regression_loss = regression_criterion(regression_output, labels_regression)
-        regression_loss = regression_criterion(regression_output, batch_labels_regression)
+
+
+        # regression_loss = regression_criterion(regression_output.squeeze(), batch_labels_regression)
+        regression_output_rounded = torch.tensor(np.round(np.abs(regression_output.cpu().detach().numpy()),1))
+        regression_loss = regression_criterion(regression_output_rounded, batch_labels_regression.cpu())
 
 
         # Total loss is a weighted combination of classification and regression losses
@@ -194,25 +166,21 @@ for epoch in range(NUM_EPOCHS):
 
         # Regression Training Accuracy outputs
 
-        # print('regression training output')
-        # print(regression_output.flatten())
-
-        predicted_outputs = regression_output.flatten().cpu()
+        # Take the absolute value to remove negatives
+        # Round the values to 1 decimal
+        predicted_outputs = torch.tensor(np.round(np.abs(regression_output.cpu().detach().numpy()),1))
         true_outputs = batch_labels_regression.cpu()
 
-        all_predicted_outputs.extend(predicted_outputs)
+        all_predicted_outputs.extend(predicted_outputs.flatten())
         all_true_outputs.extend(true_outputs)
 
 
     ## Calculate Classification Accuracy
-    print(f'All True outputs: {all_true_outputs}')
-    print(f'All Predicted outputs: {all_predicted_outputs}')
     classification_accuracy = f1_score(all_true_labels, all_predicted_labels,average='weighted')
     ## Calculate Regression Accuracy using R2
     # print(f'All True Outputs :{all_true_outputs.detach().cpu().numpy()}')
 
     regression_accuracy = r2_score([item.detach().cpu().numpy() for item in all_true_outputs], [item.detach().cpu().numpy() for item in all_predicted_outputs])
-    # regression_accuracy = r2_score(all_true_outputs, all_predicted_outputs)
 
     ## Training confusion Metrics
     # Calculate the confusion matrix
@@ -263,23 +231,21 @@ def evaluate_model(model, data_loader, classification_criterion, regression_crit
           all_true_labels.extend(batch_labels_classification.cpu().numpy())
 
           ## Regression Accuracy Variables
-          # predicted_outputs = regression_output.squeeze().cpu().numpy()
-          # predicted_outputs = regression_output.squeeze()
-
-          predicted_outputs = regression_output.flatten().cpu()
 
 
+          #predicted_outputs = regression_output.flatten().cpu()
+          predicted_outputs= torch.tensor(np.round(np.abs(regression_output.cpu().detach().numpy()),1))
           true_outputs = batch_labels_regression.cpu()
           # true_outputs = labels_regression.cpu()
 
-          all_predicted_outputs.extend(predicted_outputs)
+          # all_predicted_outputs.extend(predicted_outputs)
+          all_predicted_outputs.extend(predicted_outputs.flatten())
+
           all_true_outputs.extend(true_outputs)
 
 
 
           classification_loss = classification_criterion(classification_logits, batch_labels_classification)
-          # regression_loss = regression_criterion(regression_output.squeeze(), labels_regression)
-          # regression_loss = regression_criterion(regression_output.squeeze(), labels_regression)
           regression_loss = regression_criterion(regression_output.squeeze(),batch_labels_regression)
 
 
@@ -290,17 +256,7 @@ def evaluate_model(model, data_loader, classification_criterion, regression_crit
     #Classification Accuracy
     classification_accuracy = accuracy_score(all_true_labels, all_predicted_labels)
 
-    # print(f"all_true_labels.shape: {all_true_labels}")
-    # print(f"all_predicted_labels.shape: {all_predicted_labels}")
-
-
-    # print(f"all_true_outputs.shape: {all_true_outputs}")
-    # print(f"all_predicted_outputs.shape: {all_predicted_outputs}")
-
     ## Regression Accuracy
-    # regression_accuracy = mean_squared_error(all_true_outputs, all_predicted_outputs)
-
-    # print(f"labels_regression:{labels_regression}")
     # regression_accuracy = mean_squared_error(all_predicted_outputs, all_true_outputs )
     # Calculate the R-squared (R2) score
     regression_accuracy = r2_score(all_true_outputs, all_predicted_outputs)
