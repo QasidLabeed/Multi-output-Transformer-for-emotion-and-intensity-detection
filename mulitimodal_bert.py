@@ -5,6 +5,9 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, mean_squared_error,r2_score,f1_score,confusion_matrix
 from torch.optim import RMSprop,SGD,Adagrad
+import torch.nn as nn
+# import EarlyStopping
+from pytorchtools import EarlyStopping
 
 
 # Load pre-trained BERT tokenizer and model
@@ -95,11 +98,13 @@ optimizer = AdamW(multi_task_model.parameters(), lr=2e-5)
 
 
 
+
 classification_criterion = torch.nn.CrossEntropyLoss()
-regression_criterion = torch.nn.MSELoss()
+# regression_criterion = torch.nn.MSELoss()
+regression_criterion = nn.L1Loss()
 
 # Train the multi-task model
-NUM_EPOCHS = 6
+NUM_EPOCHS = 1
 # Early stopping parameters
 early_stopping_patience = 20  # Number of epochs to wait for improvement
 best_combined_loss = float('inf')  # Initialize the best validation loss
